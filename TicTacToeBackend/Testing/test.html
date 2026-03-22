@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tic-Tac-Toe Real-Time Client</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; }
+        .board { display: grid; grid-template-columns: repeat(3, 100px); gap: 5px; margin: 20px 0; }
+        .cell { width: 100px; height: 100px; font-size: 2em; cursor: pointer; }
+        .cell:disabled { cursor: not-allowed; background-color: #f0f0f0; }
+        .panel { padding: 15px; background: #eee; border-radius: 5px; margin-bottom: 20px; }
+        pre { background: #222; color: #0f0; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="panel">
+        <label>Server URL:</label>
+        <input type="text" id="serverUrl" value="http://localhost:8080" style="width: 200px;">
+        <br><br>
+        <button onclick="createNewGame()">1. Create New Game (via REST)</button>
+        <hr>
+        <label>Game ID:</label>
+        <input type="text" id="gameIdInput" placeholder="Paste Game ID here" style="width: 250px;">
+        <button onclick="connectToGame()">2. Join Game (via SignalR)</button>
+    </div>
+
+    <h2 id="statusMessage">Not Connected</h2>
+
+    <div class="board" id="board">
+        <button class="cell" onclick="sendMove(0)"></button>
+        <button class="cell" onclick="sendMove(1)"></button>
+        <button class="cell" onclick="sendMove(2)"></button>
+        <button class="cell" onclick="sendMove(3)"></button>
+        <button class="cell" onclick="sendMove(4)"></button>
+        <button class="cell" onclick="sendMove(5)"></button>
+        <button class="cell" onclick="sendMove(6)"></button>
+        <button class="cell" onclick="sendMove(7)"></button>
+        <button class="cell" onclick="sendMove(8)"></button>
+    </div>
+
+    <h3>Raw JSON State:</h3>
+    <pre id="output">Waiting for state...</pre>
+
+    <script>
+        let connection = null;
+        let currentGameId = null;
+
+        async function createNewGame() {
+            const baseUrl = document.getElementById("serverUrl").value;
+            try {
+                const response = await fetch(`${baseUrl}/games`, { method: 'POST' });
+                const game = await response.json();
+                
+                document.getElementById("gameIdInput").value = game.id;
+                console.log("Game created:", game.id);
+                
+                // Automatically connect after creating
+                connectToGame();
+            } catch (err) {
+                alert("Failed to create game. Is the server running and CORS enabled?\n" + err);
+            }
+        }
+
+        async function connectToGame() {
+            const baseUrl = document.getElementById("serverUrl").value;
+            currentGameId = document.getElementById("gameIdInput").value;
+
+            if (!currentGameId) {
+                alert("Please enter a Game ID first.");
+                return;
+            }
+
+            // Stop existing connection if we are switching games
+            if (connection) {
+                await connection.stop();
+            }
+
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl(`${baseUrl}/gamehub`)
+                .build();
+
+            connection.on("GameStateUpdated", function (game) {
+                updateUI(game);
+            });
+
+            try {
+                await connection.start();
+                document.getElementById("statusMessage").innerText = "Connected! Joining room...";
+                await connection.invoke("JoinGame", currentGameId);
+            } catch (err) {
+                console.error(err);
+                document.getElementById("statusMessage").innerText = "Connection Failed!";
+            }
+        }
+
+        function sendMove(position) {
+            if (!connection || !currentGameId) return;
+            connection.invoke("MakeMove", currentGameId, position).catch(err => console.error(err));
+        }
+
+        function updateUI(game) {
+            // 1. Update Raw JSON
+            document.getElementById("output").innerText = JSON.stringify(game, null, 2);
+
+            // 2. Update Status Text
+            const statusEl = document.getElementById("statusMessage");
+            if (game.status === "InProgress") {
+                statusEl.innerText = `Game On! Turn: ${game.currentTurn}`;
+            } else {
+                statusEl.innerText = `Game Over: ${game.status}`;
+            }
+
+            // 3. Update Board Buttons
+            const cells = document.querySelectorAll(".cell");
+            for (let i = 0; i < 9; i++) {
+                const cellValue = game.board[i] === '\u0000' ? "" : game.board[i];
+                cells[i].innerText = cellValue;
+                
+                // Disable button if it has a value, or if the game is over
+                cells[i].disabled = cellValue !== "" || game.status !== "InProgress";
+            }
+        }
+    </script>
+</body>
+</html>

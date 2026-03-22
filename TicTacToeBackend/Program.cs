@@ -1,44 +1,56 @@
-var builder = WebApplication.CreateBuilder(args);
+using System.Collections.Concurrent;
+using TicTacToeBackend.Hubs;
+using TicTacToeBackend.Models;
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+var builder = WebApplication.CreateBuilder(args);
+// 1. Add CORS (so our test HTML file can connect)
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.AllowAnyHeader()
+              .AllowAnyMethod()
+              .SetIsOriginAllowed(_ => true) // Open for testing
+              .AllowCredentials();
+    });
+});
+
+// 1. Register our "Database" as a Singleton in the DI Container
+builder.Services.AddSingleton<ConcurrentDictionary<Guid, Game>>();
+builder.Services.AddSignalR(); // 2. Add SignalR to the DI Container
 
 var app = builder.Build();
+app.UseCors(); // 3. Enable CORS
+// 2. Define Endpoints
+var games = app.Services.GetRequiredService<ConcurrentDictionary<Guid, Game>>();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Create a new game
+app.MapPost("/games", () =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    var game = new Game();
+    games.TryAdd(game.Id, game);
+    return Results.Created($"/games/{game.Id}", game);
+});
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+// Get game state
+app.MapGet("/games/{id:guid}", (Guid id) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    return games.TryGetValue(id, out var game) 
+        ? Results.Ok(game) 
+        : Results.NotFound("Game not found.");
+});
 
-app.MapGet("/weatherforecast", () =>
+// Make a move
+app.MapPost("/games/{id:guid}/move", (Guid id, MoveRequest request) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+    if (!games.TryGetValue(id, out var game))
+        return Results.NotFound("Game not found.");
 
+    if (!game.MakeMove(request.Position))
+        return Results.BadRequest("Invalid move or game is over.");
+
+    return Results.Ok(game);
+});
+// Add this line right here!
+app.MapHub<GameHub>("/gamehub");
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
