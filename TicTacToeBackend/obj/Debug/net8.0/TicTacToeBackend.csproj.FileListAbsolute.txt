@@ -31,3 +31,4 @@
 /Users/jatinderpal.singh/Code/backend/TicTacToeBackend/obj/Debug/net8.0/TicTacToeBackend.pdb
 /Users/jatinderpal.singh/Code/backend/TicTacToeBackend/obj/Debug/net8.0/TicTacToeBackend.genruntimeconfig.cache
 /Users/jatinderpal.singh/Code/backend/TicTacToeBackend/obj/Debug/net8.0/ref/TicTacToeBackend.dll
+/Users/jatinderpal.singh/Code/backend/TicTacToeBackend/obj/Debug/net8.0/TicTacToeBackend.sourcelink.json
