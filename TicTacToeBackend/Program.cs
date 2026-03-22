@@ -57,12 +57,12 @@ var games = app.Services.GetRequiredService<ConcurrentDictionary<Guid, Game>>();
 // Minimal APIs (app.MapPost, app.MapGet) bypass the heavy allocation overhead of traditional 
 // MVC Controllers. Under the hood, .NET 8 uses Source Generators and expression trees to compile 
 // these lambdas into highly optimized request delegates at startup.
-app.MapPost("/games", () =>
+app.MapPost("/games" , (ILogger<Program> logger) =>
 {
     var game = new Game();
     // TryAdd is atomic. It safely handles the microscopic chance of a Guid collision.
     games.TryAdd(game.Id, game);
-    
+    logger.LogInformation("🆕 REST: Created new game with ID: {GameId}", game.Id);
     // Results.Created returns an implementation of IResult. 
     // It automatically formats the HTTP 201 response and serializes the 'game' object to JSON.
     return Results.Created($"/games/{game.Id}", game);
@@ -70,22 +70,34 @@ app.MapPost("/games", () =>
 
 // The {id:guid} syntax is an inline route constraint. If a user passes a string that isn't a valid GUID, 
 // the routing engine short-circuits and returns a 404 before this code block even executes, saving CPU cycles.
-app.MapGet("/games/{id:guid}", (Guid id) =>
+app.MapGet("/games/{id:guid}", (Guid id, ILogger<Program> logger) =>
 {
-    return games.TryGetValue(id, out var game) 
-        ? Results.Ok(game) 
-        : Results.NotFound("Game not found.");
+    if (games.TryGetValue(id, out var game))
+    {
+        logger.LogInformation("👀 REST: Fetched state for game ID: {GameId}", id);
+        return Results.Ok(game);
+    }
+    
+    logger.LogWarning("⚠️ REST: Attempted to fetch missing game ID: {GameId}", id);
+    return Results.NotFound("Game not found.");
 });
 
 // The .NET model binder automatically deserializes the incoming JSON body into the 'MoveRequest' record.
-app.MapPost("/games/{id:guid}/move", (Guid id, MoveRequest request) =>
+app.MapPost("/games/{id:guid}/move", (Guid id, MoveRequest request, ILogger<Program> logger) =>
 {
     if (!games.TryGetValue(id, out var game))
+    {
+        logger.LogWarning("⚠️ REST: Move attempted on missing game ID: {GameId}", id);
         return Results.NotFound("Game not found.");
+    }
 
     if (!game.MakeMove(request.Position))
+    {
+        logger.LogWarning("❌ REST: Invalid move at position {Position} for game ID: {GameId}. Status: {Status}", request.Position, id, game.Status);
         return Results.BadRequest("Invalid move or game is over.");
-
+    }
+    
+    logger.LogInformation("✅ REST: Valid move at position {Position} for game ID: {GameId}. Next turn: {CurrentTurn}", request.Position, id, game.CurrentTurn);
     return Results.Ok(game);
 });
 
@@ -94,6 +106,9 @@ app.MapPost("/games/{id:guid}/move", (Guid id, MoveRequest request) =>
 // the server intercepts it. If the client requests an upgrade to WebSockets (via the "Connection: Upgrade" header),
 // Kestrel drops the standard HTTP context and transitions the TCP socket into a persistent, bidirectional stream.
 app.MapHub<GameHub>("/gamehub");
+
+// 💡 INJECTED: A final startup log before the blocking Run() call
+app.Logger.LogInformation("🚀 Tic-Tac-Toe Backend is starting up and ready for connections!");
 
 // 7. EXECUTION
 // app.Run() blocks the main thread and starts the Kestrel web server listening on the configured ports 
